@@ -3,6 +3,7 @@ using Dapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -16,10 +17,12 @@ namespace CoffeeConnoisseur.Controllers
     public class CoffeeController : ControllerBase
     {
         private readonly string _connectionString;
-        
-        public CoffeeController(IConfiguration configuration)
+        private readonly ILogger<CoffeeController> _logger;
+
+        public CoffeeController(IConfiguration configuration, ILogger<CoffeeController> logger)
         {
             _connectionString = configuration.GetConnectionString("CoffeeDatabase");
+            _logger = logger;
         }
 
         // GET: api/coffee
@@ -43,6 +46,16 @@ namespace CoffeeConnoisseur.Controllers
             try
             {
                 using var db = new SqlConnection(_connectionString);
+
+                if (db.QueryFirstOrDefault<int>("select count(*) from Coffee where CoffeeId = @CoffeeId", new Dictionary<string, object>() { { "CoffeeId", id } }) == 0)
+                {
+                    throw new Exception("Invalid coffee id " + id);
+                }
+                if (db.QueryFirstOrDefault<int>("select count(*) from Rating where CoffeeId = @CoffeeId", new Dictionary<string, object>() { { "CoffeeId", id } }) == 0)
+                {
+                    throw new Exception("No ratings for coffee " + id);
+                }
+
                 // Add number of ratings to ratingId column...
                 ratings = db.Query<Rating>(@"select Rating.*, Coffee.CoffeeName from Rating
                                              join Coffee on Rating.CoffeeId = Coffee.CoffeeId
@@ -53,8 +66,9 @@ namespace CoffeeConnoisseur.Controllers
                                              where Rating.CoffeeId = @CoffeeId",
                                            new Dictionary<string, object>() { { "CoffeeId", id } }).ToList();
             }
-            catch(Exception)
+            catch(Exception ex)
             {
+                _logger.Log(LogLevel.Error, ex, "Unable to find coffee rating for coffee id " + id);
                 return NotFound();
             }
             return Ok(ratings);
